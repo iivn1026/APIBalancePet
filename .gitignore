@@ -1,0 +1,25 @@
+# Local Python environment and generated build files
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+build/
+dist/
+*.spec
+*.log
+.pytest_cache/
+
+# Local settings and credentials must never be committed
+.env
+.env.*
+settings.json
+settings.tmp
+images/
+*.pem
+*.key
+
+# Editor / OS state
+.idea/
+.vscode/
+Thumbs.db
+Desktop.ini
