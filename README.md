@@ -19,7 +19,9 @@
 
 环境：Windows 10 / 11，64 位。打包版不需要安装 Python。
 
-1. 打开本文件夹中的 `dist/APIBalancePet.exe`。
+下载：[最新 Windows 版本](https://github.com/iivn1026/APIBalancePet/releases/latest)。可以下载单独 EXE，也可以解压包含程序、README 和 MIT 许可证的便携包。
+
+1. 打开下载的 `APIBalancePet.exe`；本地源码交付文件夹中的程序位于 `dist/APIBalancePet.exe`。
 2. 右键角色，选择 **设置 → 接口连接**。
 3. 填写请求地址，例如 `https://example.com`，再填写自己的 API Key。
 4. 按站点文档填写余额接口路径；留空时使用 `/v1/usage`。
