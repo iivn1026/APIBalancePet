@@ -32,6 +32,7 @@ class Tests(unittest.TestCase):
     def test_bad(self):
         for p in [{},{'balance':'NaN'},{'balance':True},{'balance':None},{'mode':'quota_limited','rate_limits':[]},{'isValid':False,'balance':10}]:
             with self.assertRaises(ValueError):m.parse_balance(p)
+    @unittest.skipUnless(sys.platform == 'win32', 'Windows DPAPI only')
     def test_dpapi_storage(self):
         with tempfile.TemporaryDirectory() as d, patch.object(m,'CONFIG',Path(d)/'settings.json'):
             c=dict(m.DEFAULT,key='test-only-secret')

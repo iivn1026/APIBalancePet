@@ -1,8 +1,9 @@
 """Borderless thought-cloud UI. No credentials or network requests live here."""
-import ctypes
 import math
 import tkinter as tk
 from PIL import Image, ImageDraw, ImageTk, ImageFilter, ImageChops
+
+from platform_support import MACOS, FONT, BACKGROUND, transparent_window, mouse_buttons
 
 TRANSPARENT = '#ff00ff'
 INK = '#51466C'
@@ -60,6 +61,9 @@ def cloud_image(body, mode, anchor):
         gradient.putpixel((0,y),(round(255-8*t),round(254-11*t),255))
     image.paste(gradient.resize((width,height)),(0,0),mask)
     image.paste('#E4DCEE',(0,0,width,height),edge)
+    if MACOS:
+        image=image.convert('RGBA')
+        image.putalpha(ImageChops.lighter(mask,shadow))
     return image,(ox,oy)
 
 
@@ -67,16 +71,16 @@ class ThoughtBubble:
     def __init__(self,pet):
         self.pet=pet
         self.window=tk.Toplevel(pet.root)
+        self.window.title('APIBalancePet · 余额气泡')
         self.window.withdraw()
         self.window.overrideredirect(True)
-        self.window.configure(bg=TRANSPARENT)
-        self.window.wm_attributes('-transparentcolor',TRANSPARENT)
-        self.window.wm_attributes('-toolwindow',True)
-        self.canvas=tk.Canvas(self.window,bg=TRANSPARENT,highlightthickness=0,bd=0)
+        transparent_window(self.window, tool=True)
+        self.canvas=tk.Canvas(self.window,bg=BACKGROUND,highlightthickness=0,bd=0)
         self.canvas.pack()
         self.visible=False
         self.page=0
         self.last_layout=None
+        self.buttons=(False, False)
         self.window.bind('<Escape>',lambda _:self.hide())
         self.canvas.bind('<MouseWheel>',self.wheel)
         pet.root.bind('<Escape>',lambda _:self.hide())
@@ -92,7 +96,7 @@ class ThoughtBubble:
         self.window.deiconify()
         self.window.lift()
         self.window.focus_force()
-        for key in (1,2):ctypes.windll.user32.GetAsyncKeyState(key)
+        self.buttons=mouse_buttons()
 
     def turn(self,delta):
         report=self.pet.usage_report or {}
@@ -105,13 +109,15 @@ class ThoughtBubble:
 
     def poll(self):
         if not self.visible:return
-        for key in (1,2):
-            if ctypes.windll.user32.GetAsyncKeyState(key)&0x8001:
-                x,y=self.window.winfo_pointerxy()
-                def inside(win):
-                    return win.winfo_rootx()<=x<win.winfo_rootx()+win.winfo_width() and win.winfo_rooty()<=y<win.winfo_rooty()+win.winfo_height()
-                if not inside(self.window) and not inside(self.pet.root):
-                    self.hide();return
+        buttons=mouse_buttons()
+        pressed=any(current and not previous for current,previous in zip(buttons,self.buttons))
+        self.buttons=buttons
+        if pressed:
+            x,y=self.window.winfo_pointerxy()
+            def inside(win):
+                return win.winfo_rootx()<=x<win.winfo_rootx()+win.winfo_width() and win.winfo_rooty()<=y<win.winfo_rooty()+win.winfo_height()
+            if not inside(self.window) and not inside(self.pet.root):
+                self.hide();return
 
     def render(self):
         if not self.visible:return
@@ -132,7 +138,7 @@ class ThoughtBubble:
         self.canvas.delete('all')
         self.canvas.create_image(0,0,image=self.background,anchor='nw')
         def text(x,y,value,size=10,color=INK,bold=False,anchor='center',width=None,tag=None):
-            return self.canvas.create_text(x+ox,y+oy,text=value,font=('Microsoft YaHei UI',size,'bold' if bold else 'normal'),fill=color,anchor=anchor,width=width or 0,tags=tag or ())
+            return self.canvas.create_text(x+ox,y+oy,text=value,font=(FONT,size,'bold' if bold else 'normal'),fill=color,anchor=anchor,width=width or 0,tags=tag or ())
         def button(x,y,value,callback,tag):
             self.canvas.create_oval(x+ox-14,y+oy-13,x+ox+14,y+oy+13,fill='#EEE7F8',outline='',tags=tag)
             text(x,y,value,10,'#8B7B9F',tag=tag)

@@ -1,6 +1,6 @@
 # APIBalancePet
 
-一个轻量的 Windows API 余额桌宠。平时只显示透明角色，点击角色后，在头顶弹出云朵形思考气泡，查看余额和模型用量。
+一个轻量的 Windows / macOS API 余额桌宠。平时只显示透明角色，点击角色后，在头顶弹出云朵形思考气泡，查看余额和模型用量。
 
 ## 功能
 
@@ -9,7 +9,7 @@
 - **自定义外观**：导入 PNG、JPG、WebP，保留透明背景，支持 30%～200% 实时缩放。
 - **自定义连接**：请求地址与余额接口路径分开设置，路径默认 `/v1/usage`。
 - **自动刷新**：默认每 300 秒刷新，可设置 60～86400 秒；低余额时改变金额颜色。
-- **本机配置**：API Key 使用 Windows DPAPI 加密保存，角色图片仅复制到本机。
+- **本机配置**：API Key 在 Windows 使用 DPAPI、在 macOS 使用系统钥匙串保存，角色图片仅复制到本机。
 
 程序不预设服务商地址，也不包含 API Key、账号或个人配置。首次启动可先体验桌宠，再通过右键设置连接信息。
 
@@ -183,3 +183,28 @@ APIBalancePet/
 项目源码采用 [MIT License](LICENSE)，允许使用、修改和分发，需保留版权声明与许可文本。
 
 默认角色图片作为展示素材保留，不声明该角色为本项目原创；MIT 许可不授予第三方角色图片及其衍生图标的权利。
+
+## macOS 版本
+
+已增加 macOS 兼容：透明窗口、云朵气泡、右键 / Control 点击、图片缩放和系统钥匙串保存 API Key。macOS 配置位于 `~/Library/Application Support/APIBalancePet/settings.json`，图片位于同目录下的 `images/`；Key 存在登录钥匙串的 `APIBalancePet` 服务中，JSON 只保存引用。删除 JSON 不会删除钥匙串条目，清除 Key 时请先在设置中把 Key 留空并保存。
+
+在 Mac 上使用 Python 3.11 或更新版本（Mac 图形窗口使用 Qt / PySide6）：
+
+```sh
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements-build.txt
+.venv/bin/python balance_pet.py --preview --smoke-test
+.venv/bin/python build.py
+```
+
+输出 `dist/APIBalancePet.app`、`dist/APIBalancePet-macOS-<架构>.zip` 和 `dist/SHA256SUMS.txt`。解压 ZIP，双击应用即可运行，也可以拖入“应用程序”。打包应用包含 Python 和依赖，无需另外安装 Python。
+
+2026-10-11 本地验证环境：Intel x86_64、macOS 15.8.1、Python 3.12.14、Qt / PySide6 6.12.0。本次包是 Intel 版本，Apple 芯片原生版本需要在 arm64 Python 环境中重新构建；尚未在 Apple 芯片或其他 macOS 版本上验证。
+
+应用仅有本地 ad-hoc 签名，未做 Apple Developer ID 签名或公证。跨机器下载后若被系统拦截，可在确认来源后使用“系统设置 → 隐私与安全性 → 仍要打开”。
+
+验证使用模拟余额，不需要真实 Key；单元测试中的钥匙串读写通过替身验证，真实服务商接口和系统钥匙串授权交互需在首次配置时确认。
+
+macOS 窗口使用 Qt 的透明无边框绘制，以避免 Tk 在本机出现黑色矩形背景和标题栏。设置对话框保留正常窗口栏，角色与气泡不显示窗口栏。Qt 6.12 依赖要求 macOS 14 或更新版本。
+
+Mac 图形回归测试：`.venv/bin/python tests/macos_gui_smoke.py`，检查角色 / 气泡透明像素、原生无标题栏窗口和设置取消恢复缩放。

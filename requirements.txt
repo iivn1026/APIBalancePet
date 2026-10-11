@@ -1,1 +1,3 @@
 Pillow==12.3.0
+keyring==25.7.0; sys_platform == "darwin"
+PySide6-Essentials==6.12.0; sys_platform == "darwin"

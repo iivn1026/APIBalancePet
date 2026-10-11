@@ -1,4 +1,4 @@
-"""Windows balance desktop pet. Network access is limited to user-configured GET requests."""
+"""Windows and macOS balance desktop pet. Network access is limited to user-configured GET requests."""
 import base64
 import ctypes
 from ctypes import wintypes
@@ -21,9 +21,11 @@ from urllib.parse import urlencode
 import uuid
 from PIL import Image, ImageTk, ImageOps, UnidentifiedImageError
 from thought_bubble import ThoughtBubble
+from platform_support import MACOS, FONT, BACKGROUND, transparent_window
 
 ROOT = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent))
-CONFIG = Path(os.environ.get('LOCALAPPDATA', str(Path.home()))) / 'APIBalancePet' / 'settings.json'
+CONFIG = (Path.home() / 'Library' / 'Application Support' if MACOS else
+          Path(os.environ.get('LOCALAPPDATA', str(Path.home())))) / 'APIBalancePet' / 'settings.json'
 DEFAULT = dict(url='', api_path='/v1/usage', key='', interval=300, threshold='5', topmost=True,
                image_path='', pet_size=100, usage_enabled=True, usage_period='24h')
 PERIODS = {'近24小时': '24h', '近7天': '7d', '近30天': '30d'}
@@ -61,7 +63,16 @@ def load_config():
         if 'api_path' not in saved:
             old_path = urlsplit(cfg['url']).path.rstrip('/')
             if old_path.endswith('/usage'): cfg['api_path'] = old_path
-        cfg['key'] = crypt(base64.b64decode(saved['encrypted_key']), True).decode() if saved.get('encrypted_key') else ''
+        if MACOS:
+            from keyring.backends.macOS import Keyring
+            from keyring.errors import KeyringError
+            try:
+                if saved.get('keychain_account'):
+                    cfg['key'] = Keyring().get_password('APIBalancePet', saved['keychain_account']) or ''
+            except KeyringError:
+                cfg['key'] = ''
+        else:
+            cfg['key'] = crypt(base64.b64decode(saved['encrypted_key']), True).decode() if saved.get('encrypted_key') else ''
     except (OSError, ValueError, KeyError):
         cfg['key'] = ''
     return cfg
@@ -69,7 +80,21 @@ def load_config():
 
 def save_config(cfg):
     saved = {k: v for k, v in cfg.items() if k != 'key'}
-    saved['encrypted_key'] = base64.b64encode(crypt(cfg['key'].encode())).decode() if cfg['key'] else ''
+    if MACOS:
+        from keyring.backends.macOS import Keyring
+        import hashlib
+        account = hashlib.sha256(str(CONFIG.resolve()).encode()).hexdigest()
+        try:
+            vault = Keyring()
+            if cfg['key']:
+                vault.set_password('APIBalancePet', account, cfg['key'])
+                saved['keychain_account'] = account
+            elif vault.get_password('APIBalancePet', account) is not None:
+                vault.delete_password('APIBalancePet', account)
+        except Exception as error:
+            raise OSError('无法保存到 macOS 钥匙串，请检查钥匙串是否已解锁。') from error
+    else:
+        saved['encrypted_key'] = base64.b64encode(crypt(cfg['key'].encode())).decode() if cfg['key'] else ''
     CONFIG.parent.mkdir(parents=True, exist_ok=True)
     temp = CONFIG.with_suffix('.tmp')
     temp.write_text(json.dumps(saved, ensure_ascii=False, indent=2), 'utf-8')
@@ -228,15 +253,14 @@ class Pet:
         self.cfg = DEFAULT.copy() if preview else load_config()
         self.root = tk.Tk()
         self.root.tk.call('tk', 'scaling', 96 / 72)
-        self.root.option_add('*Font', '{Microsoft YaHei UI} 10')
+        self.root.option_add('*Font', '{'+FONT+'} 10')
         self.root.title('APIBalancePet')
         self.root.overrideredirect(True)
-        self.root.configure(bg='#ff00ff')
-        self.root.wm_attributes('-transparentcolor', '#ff00ff')
+        transparent_window(self.root)
         self.root.wm_attributes('-topmost', bool(self.cfg['topmost']))
         self.width, self.height = 186, 338
         self.root.geometry(f'{self.width}x{self.height}+{max(0,self.root.winfo_screenwidth()-240)}+{max(0,self.root.winfo_screenheight()-430)}')
-        self.canvas = tk.Canvas(self.root, width=self.width, height=self.height, bg='#ff00ff', highlightthickness=0, bd=0)
+        self.canvas = tk.Canvas(self.root, width=self.width, height=self.height, bg=BACKGROUND, highlightthickness=0, bd=0)
         self.canvas.pack()
         self.root.update_idletasks()
         self.pic = self.canvas.create_image(self.width//2, self.height//2)
@@ -258,6 +282,9 @@ class Pet:
         self.menu.add_separator()
         self.menu.add_command(label='退出', command=self.root.destroy)
         self.canvas.bind('<Button-3>', self.right_click)
+        if MACOS:
+            self.canvas.bind('<Button-2>', self.right_click)
+            self.canvas.bind('<Control-Button-1>', self.right_click)
         self.results = queue.Queue()
         self.busy = False
         self.generation = 0
@@ -272,7 +299,8 @@ class Pet:
         scale = max(30, min(200, int(float(size)))) / 100
         factor = min(180*scale/image.width, 326*scale/image.height)
         rendered = image.resize((max(1,round(image.width*factor)),max(1,round(image.height*factor))),Image.Resampling.LANCZOS)
-        rendered.putalpha(rendered.getchannel('A').point(lambda alpha:255 if alpha>=128 else 0))
+        if not MACOS:
+            rendered.putalpha(rendered.getchannel('A').point(lambda alpha:255 if alpha>=128 else 0))
         self.avatar = ImageTk.PhotoImage(rendered)
         old_width, old_height = self.width, self.height
         self.width, self.height = rendered.width+12, rendered.height+12
@@ -371,7 +399,7 @@ class Pet:
         d.minsize(530,520)
         d.attributes('-topmost',True)
         outer = ttk.Frame(d,padding=18); outer.pack(fill='both',expand=True)
-        ttk.Label(outer,text='余额桌宠设置',font=('Microsoft YaHei UI',16,'bold')).pack(anchor='w',pady=(0,12))
+        ttk.Label(outer,text='余额桌宠设置',font=(FONT,16,'bold')).pack(anchor='w',pady=(0,12))
         notebook = ttk.Notebook(outer); notebook.pack(fill='both',expand=True)
         connection = ttk.Frame(notebook,padding=16)
         appearance = ttk.Frame(notebook,padding=16)
@@ -386,7 +414,7 @@ class Pet:
             ttk.Entry(connection,textvariable=value,show='●' if name=='key' else '').pack(fill='x')
             if name=='api_path':
                 tk.Label(connection,text='  留空时默认使用 /v1/usage  ·  路径从站点根目录开始',bg='#ECEEF2',fg='#686E7B',anchor='w',pady=5).pack(fill='x',pady=(4,0))
-        ttk.Label(appearance,text='选择桌宠图片',font=('Microsoft YaHei UI',12,'bold')).pack(anchor='w')
+        ttk.Label(appearance,text='选择桌宠图片',font=(FONT,12,'bold')).pack(anchor='w')
         ttk.Label(appearance,text='图片只导入本机，支持 PNG / JPG / WebP。\n透明 PNG / WebP 可保留透明背景；动图使用第一帧。',wraplength=470).pack(anchor='w',pady=(6,12))
         chosen = {'path': self.cfg.get('image_path',''), 'new': False}
         try: original = read_avatar(chosen['path'] or ROOT/'avatar.png')
@@ -417,7 +445,7 @@ class Pet:
         ttk.Button(row,text='导入图片…',command=choose_image).pack(side='left')
         ttk.Button(row,text='恢复默认图片',command=reset_image).pack(side='left',padx=10)
         ttk.Label(appearance,textvariable=image_name,wraplength=460).pack(anchor='w',pady=(8,18))
-        ttk.Label(appearance,text='桌宠大小（实时预览）',font=('Microsoft YaHei UI',12,'bold')).pack(anchor='w')
+        ttk.Label(appearance,text='桌宠大小（实时预览）',font=(FONT,12,'bold')).pack(anchor='w')
         ttk.Scale(appearance,from_=30,to=200,variable=size,orient='horizontal').pack(fill='x',pady=(10,5))
         ttk.Label(appearance,textvariable=size_text).pack(anchor='w')
         ttk.Label(appearance,text='30%                                      100%                                      200%').pack(anchor='w')
@@ -427,7 +455,7 @@ class Pet:
         if self.appearance_warning:
             ttk.Label(appearance,text=self.appearance_warning,foreground='#A24957',wraplength=460).pack(anchor='w')
         usage = tk.BooleanVar(value=bool(self.cfg.get('usage_enabled',True)))
-        ttk.Label(usage_tab,text='左键菜单用量明细',font=('Microsoft YaHei UI',12,'bold')).pack(anchor='w')
+        ttk.Label(usage_tab,text='左键菜单用量明细',font=(FONT,12,'bold')).pack(anchor='w')
         ttk.Checkbutton(usage_tab,text='显示模型名称、Token 数与实际花费',variable=usage).pack(anchor='w',pady=14)
         ttk.Label(usage_tab,text='统计范围').pack(anchor='w',pady=(6,5))
         current_period = next((k for k,v in PERIODS.items() if v==self.cfg.get('usage_period')),'近24小时')
@@ -475,6 +503,9 @@ class Pet:
 
 
 if __name__ == '__main__':
+    if MACOS:
+        from mac_pet import main
+        raise SystemExit(main())
     try: ctypes.windll.shcore.SetProcessDpiAwareness(1)
     except Exception: pass
     app = Pet(preview='--preview' in sys.argv)
