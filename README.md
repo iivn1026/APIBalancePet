@@ -184,27 +184,48 @@ APIBalancePet/
 
 默认角色图片作为展示素材保留，不声明该角色为本项目原创；MIT 许可不授予第三方角色图片及其衍生图标的权利。
 
-## macOS 版本
+## macOS 1.2 菜单栏版
 
-已增加 macOS 兼容：透明窗口、云朵气泡、右键 / Control 点击、图片缩放和系统钥匙串保存 API Key。macOS 配置位于 `~/Library/Application Support/APIBalancePet/settings.json`，图片位于同目录下的 `images/`；Key 存在登录钥匙串的 `APIBalancePet` 服务中，JSON 只保存引用。删除 JSON 不会删除钥匙串条目，清除 Key 时请先在设置中把 Key 留空并保存。
+Mac 版现在常驻屏幕右上角菜单栏，使用单色钱包图标，不显示 Dock 图标或桌面角色。点击图标打开余额面板；点击“管理连接…”打开独立设置窗口。右键图标可刷新全部连接、打开设置、重新读取钥匙串或退出。关闭余额面板和设置不会退出应用。
 
-在 Mac 上使用 Python 3.11 或更新版本（Mac 图形窗口使用 Qt / PySide6）：
+### 多连接与余额
+
+- 可添加多组连接，每组分别填写名称、HTTPS API 地址、余额接口路径、API Key、低余额阈值，支持独立停用和删除。
+- 全部余额分别显示，避免混合不同货币或服务商额度；可单独刷新或全部刷新。
+- 模型用量可展开查看；刷新间隔和用量时间范围在设置中统一管理。
+- 失败时明确显示错误；保留上次成功结果时同时注明旧结果时间。
+- 余额接口仍需符合本文的兼容响应结构；新增地址不会自动适配不同服务商的认证和响应格式。
+
+### 界面与本机配置
+
+使用系统字体、原生输入控件与按钮，余额面板采用圆角分组布局，支持系统浅色与深色外观。设置提供左侧连接列表和右侧连接编辑，修改只有点击“保存”后才生效。
+
+配置仍在 `~/Library/Application Support/APIBalancePet/settings.json`，保存为版本 2 的多连接格式。密钥分别保存在系统登录钥匙串的 `APIBalancePet` 服务中，JSON 只保存引用。首次运行会读取旧版单连接配置；首次保存时迁移至多连接格式。保存失败保留原有配置；钥匙串暂不可用时，不会用空白密钥覆盖旧引用。
+
+删除连接并保存，或将密钥清空并保存，会尝试移除相应的旧钥匙串条目。不上传图片、不添加开机启动、不发送遥测。
+
+### 构建与验证
+
+要求 macOS 14 或更新版本；目前本机验证架构为 Intel x86_64。Apple 芯片原生版本需在 arm64 Python 环境中构建验证。
 
 ```sh
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements-build.txt
-.venv/bin/python balance_pet.py --preview --smoke-test
-.venv/bin/python build.py
+.venv/bin/python mac_pet.py --preview --smoke-test
+.venv/bin/python -m unittest discover -s tests -v
+.venv/bin/python tests/macos_gui_smoke.py
+.venv/bin/python build.py --dmg --dist-dir dist/menubar --work-dir build/menubar
 ```
 
-输出 `dist/APIBalancePet.app`、`dist/APIBalancePet-macOS-<架构>.zip` 和 `dist/SHA256SUMS.txt`。解压 ZIP，双击应用即可运行，也可以拖入“应用程序”。打包应用包含 Python 和依赖，无需另外安装 Python。
+输出 `.app`、ZIP、`APIBalancePet-v1.2.0-macOS-x86_64.dmg` 与 SHA-256 校验文件。DMG 包含应用、Applications 快捷入口和安装说明。打开 DMG 后将应用拖入“应用程序”，先退出旧版再启动新版，无需另装 Python。
 
-2026-10-11 本地验证环境：Intel x86_64、macOS 15.8.1、Python 3.12.14、Qt / PySide6 6.12.0。本次包是 Intel 版本，Apple 芯片原生版本需要在 arm64 Python 环境中重新构建；尚未在 Apple 芯片或其他 macOS 版本上验证。
+应用仅有本地 ad-hoc 签名，未做 Apple Developer ID 签名或公证。跨机器下载后若系统拦截，请确认来源后通过“系统设置 → 隐私与安全性”打开。
 
-应用仅有本地 ad-hoc 签名，未做 Apple Developer ID 签名或公证。跨机器下载后若被系统拦截，可在确认来源后使用“系统设置 → 隐私与安全性 → 仍要打开”。
+预览和图形测试使用模拟连接，不读取真实配置、不请求真实接口。自动测试覆盖多连接密钥隔离、旧版迁移、保存失败回滚、失效密钥引用保留，以及设置新增、切换、删除、保存、取消和过期查询结果隔离。
 
-验证使用模拟余额，不需要真实 Key；单元测试中的钥匙串读写通过替身验证，真实服务商接口和系统钥匙串授权交互需在首次配置时确认。
+### 1.2 可读性与菜单栏余额
 
-macOS 窗口使用 Qt 的透明无边框绘制，以避免 Tk 在本机出现黑色矩形背景和标题栏。设置对话框保留正常窗口栏，角色与气泡不显示窗口栏。Qt 6.12 依赖要求 macOS 14 或更新版本。
-
-Mac 图形回归测试：`.venv/bin/python tests/macos_gui_smoke.py`，检查角色 / 气泡透明像素、原生无标题栏窗口和设置取消恢复缩放。
+- 钱包图标旁显示当前账户余额和币种，由 macOS 原生状态栏控件渲染，使用系统等宽数字字体；在面板的“菜单栏显示”中选择账户。
+- 多连接分别查询，不将不同币种或不同额度类型相加。未查询显示 `—`，查询失败时在旧余额旁显示 `!`，详情和上次更新时间在面板中查看。
+- 正文和辅助文字至少 14 pt，标题和金额单独放大；输入框、按钮、连接列表均适配。深色和浅色模式使用高对比度配色，余额面板使用实色背景。
+- 已选择账户写入配置，不会为切换显示账户而重新写入钥匙串。小于 0.01 的非零余额保留四位小数，其他余额在菜单栏显示两位小数，面板保留接口解析后的完整显示精度。

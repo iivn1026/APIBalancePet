@@ -5,6 +5,8 @@ from pathlib import Path
 import subprocess
 import sys
 import os
+import plistlib
+import tempfile
 
 
 def mac_icon(source):
@@ -31,6 +33,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--dist-dir', default='dist')
     parser.add_argument('--work-dir', default='build')
+    parser.add_argument('--dmg', action='store_true', help='Also create a macOS drag-to-install DMG')
     args = parser.parse_args()
     root = Path(__file__).resolve().parent
     dist = Path(args.dist_dir).resolve()
@@ -61,15 +64,40 @@ def main():
                    env=dict(os.environ, PYINSTALLER_CONFIG_DIR=str(work / 'cache')))
     if mac:
         import platform
+        app = dist / 'APIBalancePet.app'
+        plist_path = app / 'Contents' / 'Info.plist'
+        plist = plistlib.loads(plist_path.read_bytes())
+        plist.update(LSUIElement=True, CFBundleShortVersionString='1.2.0',
+                     CFBundleVersion='1.2.0', NSHighResolutionCapable=True)
+        plist_path.write_bytes(plistlib.dumps(plist))
+        subprocess.run(['/usr/bin/codesign', '--force', '--sign', '-', str(app)], check=True)
         exe = dist / ('APIBalancePet-macOS-' + platform.machine() + '.zip')
         if exe.exists():
             exe.unlink()
         subprocess.run(['/usr/bin/ditto', '-c', '-k', '--sequesterRsrc', '--keepParent',
                         str(dist / 'APIBalancePet.app'), str(exe)], check=True)
+        if args.dmg:
+            dmg = dist / ('APIBalancePet-v1.2.0-macOS-' + platform.machine() + '.dmg')
+            with tempfile.TemporaryDirectory(prefix='dmg-', dir=work) as folder:
+                stage = Path(folder)
+                subprocess.run(['/usr/bin/ditto', str(app), str(stage / app.name)], check=True)
+                (stage / 'Applications').symlink_to('/Applications')
+                (stage / 'LICENSE.txt').write_text((root / 'LICENSE').read_text(), encoding='utf-8')
+                (stage / '安装说明.txt').write_text(
+                    'APIBalancePet 1.2.0 菜单栏版\n\n将应用拖入 Applications 后启动。'
+                    '点击屏幕右上角的钱包图标查看余额，在“管理连接”中添加多个 API 地址和密钥。'
+                    '\n本应用常驻菜单栏，不显示 Dock 图标或桌面角色。'
+                    '\n适用 macOS 14+，架构：' + platform.machine() +
+                    '\n未做 Apple Developer ID 签名或公证。\n', encoding='utf-8')
+                subprocess.run(['/usr/bin/hdiutil', 'create', '-volname', 'APIBalancePet',
+                                '-srcfolder', str(stage), '-ov', '-format', 'UDZO', str(dmg)], check=True)
     else:
         exe = dist / 'APIBalancePet.exe'
     digest = hashlib.sha256(exe.read_bytes()).hexdigest()
     (dist / 'SHA256SUMS.txt').write_text(digest + '  ' + exe.name + '\n', encoding='utf-8')
+    if mac and args.dmg:
+        with (dist / 'SHA256SUMS.txt').open('a', encoding='utf-8') as checksum:
+            checksum.write(hashlib.sha256(dmg.read_bytes()).hexdigest() + '  ' + dmg.name + '\n')
     print('Built:', exe)
 
 
