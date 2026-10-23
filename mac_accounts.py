@@ -1,6 +1,9 @@
-"""Versioned multi-account settings; secrets live only in macOS Keychain."""
+"""Local multi-account settings with one-time migration of legacy Keychain keys."""
 import json
+import os
+import tempfile
 import uuid
+from pathlib import Path
 from urllib.parse import urlsplit
 import balance_pet as core
 
@@ -34,105 +37,101 @@ def validate(data):
             raise ValueError('低余额阈值不能小于 0。')
 
 
+def _write(saved, path):
+    """Create the temporary file privately before writing any credentials."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    temporary = None
+    try:
+        fd, name = tempfile.mkstemp(prefix='.settings-', suffix='.tmp', dir=path.parent)
+        temporary = Path(name)
+        with os.fdopen(fd, 'w', encoding='utf-8') as stream:
+            json.dump(saved, stream, ensure_ascii=False, indent=2)
+            stream.flush()
+            os.fsync(stream.fileno())
+        temporary.chmod(0o600)
+        temporary.replace(path)
+    except OSError as error:
+        raise OSError('保存失败，原有配置已保留。请检查配置文件权限。') from error
+    finally:
+        if temporary is not None: temporary.unlink(missing_ok=True)
+
+
 def load(path=None, vault=None):
-    from keyring.backends.macOS import Keyring
-    from keyring.errors import KeyringError
     path = path or core.CONFIG
     data = dict(PREFERENCES, accounts=[])
     try:
         saved = json.loads(path.read_text('utf-8'))
-        if not isinstance(saved, dict):
-            raise ValueError('Invalid settings')
+        if not isinstance(saved, dict): raise ValueError('Invalid settings')
     except FileNotFoundError:
         return data
     except (OSError, ValueError) as error:
         raise OSError('无法读取配置文件，请先备份并检查 settings.json。') from error
     for key in PREFERENCES:
         data[key] = saved.get(key, PREFERENCES[key])
-    if saved.get('version') == 2:
+    if saved.get('version') in (2, 3):
         items = saved.get('accounts', [])
     else:
         items = []
         if saved.get('url') or saved.get('keychain_account'):
             item = account(urlsplit(saved.get('url', '')).hostname or '原有连接')
-            item.update({k: saved[k] for k in ('url', 'api_path', 'threshold', 'keychain_account') if k in saved})
+            item.pop('key')
+            item.update({k: saved[k] for k in ('url', 'api_path', 'threshold', 'keychain_account', 'key') if k in saved})
             if 'api_path' not in saved:
                 old_path = urlsplit(saved.get('url', '')).path.rstrip('/')
                 if old_path.endswith('/usage'): item['api_path'] = old_path
             items.append(item)
-    vault = vault or Keyring()
+    migrated = False
     for raw in items:
         item = account()
-        item.update({k: raw[k] for k in ('id', 'name', 'url', 'api_path', 'threshold', 'enabled', 'keychain_account') if k in raw})
-        if item.get('keychain_account'):
+        item.update({k: raw[k] for k in ('id', 'name', 'url', 'api_path', 'threshold', 'enabled') if k in raw})
+        if 'key' in raw and isinstance(raw['key'], str):
+            item['key'] = raw['key']
+        elif raw.get('keychain_account'):
+            item['keychain_account'] = raw['keychain_account']
+            item['key'] = None
             try:
+                if vault is None:
+                    from keyring.backends.macOS import Keyring
+                    vault = Keyring()
                 item['key'] = vault.get_password(SERVICE, item['keychain_account'])
-                if item['key'] is None:
-                    item['key_error'] = '钥匙串中未找到密钥，请重新填写。'
-            except KeyringError:
-                item['key'] = None
-                item['key_error'] = '钥匙串暂不可用，解锁后重试。'
+                if item['key'] is not None:
+                    item.pop('keychain_account')
+                    migrated = True
+            except Exception:
+                pass
+            if item['key'] is None:
+                item['key_error'] = '旧密钥未能迁移，请重新填写 API Key。'
         data['accounts'].append(item)
+    if migrated or saved.get('version') != 3:
+        save(data, path)
     return data
 
 
 def save(data, path=None, vault=None):
-    """Write new secret references, atomically commit JSON, then retire old refs."""
-    from keyring.backends.macOS import Keyring
+    """Save local keys atomically; never write to or delete from Keychain."""
     path = path or core.CONFIG
     validate(data)
-    vault = vault or Keyring()
-    previous = {}
-    if path.exists():
-        previous = json.loads(path.read_text('utf-8'))
-    old_refs = {row['keychain_account'] for row in previous.get('accounts', []) if row.get('keychain_account')}
-    if previous.get('keychain_account'):
-        old_refs.add(previous['keychain_account'])
-    written = []
     rows = []
-    references = {}
-    try:
-        for item in data['accounts']:
-            row = {k: item[k] for k in ('id', 'name', 'url', 'api_path', 'threshold', 'enabled')}
-            if item['key'] is None:
-                if item.get('keychain_account'):
-                    row['keychain_account'] = item['keychain_account']
-            elif item['key']:
-                reference = 'account-' + uuid.uuid4().hex
-                vault.set_password(SERVICE, reference, item['key'])
-                written.append(reference)
-                row['keychain_account'] = reference
-            references[item['id']] = row.get('keychain_account')
-            rows.append(row)
-        saved = dict(version=2, accounts=rows, **{key: data[key] for key in PREFERENCES})
-        path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = path.with_suffix('.tmp')
-        temporary.write_text(json.dumps(saved, ensure_ascii=False, indent=2), 'utf-8')
-        temporary.chmod(0o600)
-        temporary.replace(path)
-    except Exception as error:
-        for reference in written:
-            try: vault.delete_password(SERVICE, reference)
-            except Exception: pass
-        raise OSError('保存失败，原有配置已保留。请检查钥匙串及文件权限。') from error
-    active_refs = {row['keychain_account'] for row in rows if row.get('keychain_account')}
-    for reference in old_refs-active_refs:
-        try: vault.delete_password(SERVICE, reference)
-        except Exception: pass
     for item in data['accounts']:
-        item.pop('keychain_account', None)
-        if references[item['id']]: item['keychain_account'] = references[item['id']]
-        if item['key'] is not None: item.pop('key_error', None)
+        row = {k: item[k] for k in ('id', 'name', 'url', 'api_path', 'threshold', 'enabled')}
+        if item['key'] is None:
+            # Preserve an unreadable legacy reference so migration can be retried.
+            if item.get('keychain_account'): row['keychain_account'] = item['keychain_account']
+        else:
+            row['key'] = item['key']
+        rows.append(row)
+    _write(dict(version=3, accounts=rows, **{key: data[key] for key in PREFERENCES}), path)
+    for item in data['accounts']:
+        if item['key'] is not None:
+            item.pop('keychain_account', None)
+            item.pop('key_error', None)
 
 
 def save_selection(identifier, path=None):
-    """Change the selected balance without rewriting any Keychain secrets."""
     path = path or core.CONFIG
     if not path.exists(): return
     data = json.loads(path.read_text('utf-8'))
-    if data.get('version') != 2: return
+    if data.get('version') not in (2, 3): return
     data['menubar_account'] = identifier
-    temporary = path.with_suffix('.tmp')
-    temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2), 'utf-8')
-    temporary.chmod(0o600)
-    temporary.replace(path)
+    _write(data, path)

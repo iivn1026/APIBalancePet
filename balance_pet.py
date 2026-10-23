@@ -241,7 +241,11 @@ def fetch(cfg):
         reasons = {401: 'API Key 无效，请检查设置。', 403: '此 Key 没有查询权限。',
                    404: '没有找到余额接口，请检查地址。', 429: '查询太频繁，请稍后再试。'}
         raise ValueError(reasons.get(e.code, f'查询失败（HTTP {e.code}），请稍后再试。')) from None
-    except (urllib.error.URLError, TimeoutError, OSError):
+    except FileNotFoundError:
+        raise ValueError('程序缺少 HTTPS 运行文件，请重新安装新版。') from None
+    except (urllib.error.URLError, TimeoutError, OSError) as error:
+        import logging
+        logging.getLogger(__name__).warning('Balance connection failed (%s)', type(error).__name__)
         raise ValueError('网络连接失败，请检查网络或请求地址。') from None
     except (json.JSONDecodeError, UnicodeDecodeError):
         raise ValueError('站点返回的不是 JSON 余额数据。') from None

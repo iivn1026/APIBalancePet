@@ -1,4 +1,4 @@
-"""macOS menu bar balance monitor with native controls and Keychain accounts."""
+"""macOS menu bar balance monitor with native controls and local account settings."""
 import copy
 import queue
 import sys
@@ -114,7 +114,7 @@ class Settings(QDialog):
         self.monitor = monitor
         self.draft = copy.deepcopy(monitor.data)
         self.current = -1
-        self.setWindowTitle('API 余额 · 设置 · 1.2.0')
+        self.setWindowTitle('API 余额 · 设置 · 1.2.1')
         self.resize(860, 650)
         self.setMinimumSize(780, 590)
         outer = QVBoxLayout(self)
@@ -154,7 +154,7 @@ class Settings(QDialog):
             ('name', '连接名称', '例如：工作账户'),
             ('url', 'API 地址', 'https://example.com'),
             ('api_path', '余额接口路径', '/v1/usage'),
-            ('key', 'API Key', '保存在 macOS 钥匙串'),
+            ('key', 'API Key', '保存在本机配置文件'),
             ('threshold', '低余额阈值', '5')):
             field = QLineEdit()
             field.setPlaceholderText(placeholder)
@@ -228,7 +228,7 @@ class Settings(QDialog):
         self.show_key.setChecked(False)
         for key, field in self.fields.items(): field.setText(item.get(key) or '')
         self.enabled.setChecked(item['enabled'])
-        self.key_note.setText(item.get('key_error', '密钥加密保存在系统钥匙串中。') + (' 留空将保留原密钥。' if item['key'] is None else ''))
+        self.key_note.setText(item.get('key_error', '密钥明文保存在本机配置文件中，仅当前用户可读写。') + (' 留空将保留原密钥。' if item['key'] is None else ''))
 
     def rename(self, text):
         if self.current >= 0: self.list.item(self.current).setText(text or '未命名连接')
@@ -300,7 +300,7 @@ class Panel(QDialog):
         footer = QHBoxLayout()
         footer.addWidget(button('管理连接…', monitor.settings))
         footer.addStretch()
-        footer.addWidget(secondary('1.2.0'))
+        footer.addWidget(secondary('1.2.1'))
         footer.addWidget(button('退出', QApplication.instance().quit))
         outer.addLayout(footer)
         self.rebuild()
@@ -436,7 +436,7 @@ class Monitor:
         self.menu.addAction('全部刷新', self.refresh_all)
         self.menu.addSeparator()
         self.menu.addAction('设置…', self.settings).setShortcut(QKeySequence('Ctrl+,'))
-        self.menu.addAction('重新读取钥匙串', self.reload)
+        self.menu.addAction('重新读取配置', self.reload)
         self.menu.addSeparator()
         self.menu.addAction('退出 APIBalancePet', QApplication.instance().quit)
         self.tray.activated.connect(self.activate)
